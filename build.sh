@@ -6,6 +6,11 @@ if ! [ -x "$(command -v docker)" ]; then
 fi
 
 docker build -t hpc-collection:latest .
+if [ $? -ne 0 ]; then
+    echo "Error: Docker build failed." >&2
+    exit 1
+fi
+
 echo "HPC Collection Docker image built successfully: hpc-collection:latest"
 
 if [ "$1" = "--it" ]; then

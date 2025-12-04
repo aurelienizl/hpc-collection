@@ -1,6 +1,7 @@
 FROM ubuntu:22.04 AS builder
 
 ENV DEBIAN_FRONTEND=noninteractive
+ENV NB_CPUS=8
 
 # Install build dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -10,7 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     ca-certificates \
     gfortran \
-    libcurl4-openssl-dev \
+    zlib1g-dev \
  && rm -rf /var/lib/apt/lists/*
 
 # ----------------------------
@@ -23,7 +24,7 @@ RUN wget -O openmpi.tar.gz "https://github.com/aurelienizl/hpc-collection/raw/re
  && rm openmpi.tar.gz \
  && cd openmpi-5.0.7 \
  && ./configure --prefix=/hpc/openmpi --with-pmix=internal \
- && make -j"$(nproc)" \
+ && make -j"${NB_CPUS}" \
  && make install
 
 # ----------------------------
@@ -35,35 +36,9 @@ RUN wget -O openblas.tar.gz "https://github.com/aurelienizl/hpc-collection/raw/r
  && tar -xzf openblas.tar.gz \
  && rm openblas.tar.gz \
  && cd openblas-0.3.29 \
- && make -j"$(nproc)" all \
+ && make all -j"${NB_CPUS}" \
  && mkdir -p /hpc/openblas \
  && make PREFIX=/hpc/openblas install 
-
-# ----------------------------
-# Build HPL
-# ----------------------------
-WORKDIR /build
-
-RUN wget -O hpl.tar.gz "https://github.com/aurelienizl/hpc-collection/raw/refs/heads/dev/official/hpl/hpl-2.3.tar.gz" \
- && tar -xzf hpl.tar.gz && rm hpl.tar.gz \
- && mv hpl-2.3 ~/hpl \
- && cd ~/hpl/setup \
- && sh make_generic \
- && cp Make.UNKNOWN ../Make.linux \
- && cd .. \
- && sed -i \
-   -e 's/^ARCH[[:space:]]*=.*/ARCH         = linux/' \
-   -e 's|^TOPdir[[:space:]]*=.*|TOPdir       = $(HOME)/hpl|' \
-   -e 's|^MPdir[[:space:]]*=.*|MPdir        = /hpc/openmpi|' \
-   -e 's|^MPinc[[:space:]]*=.*|MPinc        = -I$(MPdir)/include|' \
-   -e 's|^MPlib[[:space:]]*=.*|MPlib        = -L$(MPdir)/lib -lmpi|' \
-   -e 's|^LAdir[[:space:]]*=.*|LAdir        = /hpc/openblas|' \
-   -e 's|^LAinc[[:space:]]*=.*|LAinc        =|' \
-   -e 's|^LAlib[[:space:]]*=.*|LAlib        = $(LAdir)/lib/libopenblas.a -lm -lpthread -lgfortran|' \
-   -e 's|^CC[[:space:]]*=.*|CC           = $(MPdir)/bin/mpicc|' \
-   -e 's|^LINKER[[:space:]]*=.*|LINKER       = $(CC)|' \
-   Make.linux \
- && make arch=linux
 
 # ----------------------------
 # Build NetPIPE
@@ -74,8 +49,7 @@ RUN wget -O netpipe.tar.gz "https://github.com/aurelienizl/hpc-collection/raw/re
  && tar -xzf netpipe.tar.gz && rm netpipe.tar.gz \
  && cd NetPIPE-3.7.2 \
  && export PATH="/hpc/openmpi/bin:${PATH}" \
- && make mpi
-
+ && make mpi -j"${NB_CPUS}"
 
 # ----------------------------
 # Build HPCC
@@ -85,16 +59,40 @@ WORKDIR /build
 RUN wget -O hpcc.tar.gz "https://github.com/aurelienizl/hpc-collection/raw/refs/heads/main/custom/hpcc/hpcc-a1.5.0.tar.gz" \
  && tar -xzf hpcc.tar.gz && rm hpcc.tar.gz \
  && cd hpcc-a1.5.0 \
- && make arch=linux
+ && make arch=linux -j"${NB_CPUS}" 
 
 # ----------------------------
-# Build Llama.cpp 
-# See: https://gitlab.informatik.uni-halle.de/ambcj/llama.cpp/-/tree/133d99c59980139f5bb75922c8b5fca67d7ba9b8/examples/rpc
 # ----------------------------
-WORKDIR /build
+# ----------------------------
+# ----------------------------
+# ----------------------------
 
-RUN wget -O llama.tar.gz "https://github.com/ggml-org/llama.cpp/archive/refs/tags/b7035.tar.gz" \
- && tar -xzf llama.tar.gz && rm llama.tar.gz \
- && cd llama.cpp-b7035 \
- && cmake -B build -DLLAMA_RPC=ON \
- && cmake --build build --config Release -- -j$(nproc)
+FROM ubuntu:22.04 AS runtime
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    openssh-server \
+    nano \
+    gfortran \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN sed -i 's/#Port 22/Port 2222/' /etc/ssh/sshd_config
+RUN echo "Host *" >> /etc/ssh/ssh_config && \
+    echo "    Port 2222" >> /etc/ssh/ssh_config && \
+    echo "    StrictHostKeyChecking no" >> /etc/ssh/ssh_config
+
+RUN useradd -m hpcuser
+USER hpcuser
+
+COPY --from=builder /hpc /hpc
+COPY --from=builder /build/NetPIPE-3.7.2/NPmpi /hpc/bin/NPmpi
+COPY --from=builder /build/hpcc-a1.5.0/hpcc /hpc/bin/hpcc
+
+ENV LD_LIBRARY_PATH="/hpc/openmpi/lib:/hpc/openblas/lib:${LD_LIBRARY_PATH}"
+ENV PATH="/hpc/openmpi/bin:${PATH}"
+
+RUN mkdir -p /home/hpcuser/.ssh \
+ && ssh-keygen -t rsa -f /home/hpcuser/.ssh/id_rsa -q -N "" \
+ && cat /home/hpcuser/.ssh/id_rsa.pub >> /home/hpcuser/.ssh/authorized_keys \
+ && chmod 600 /home/hpcuser/.ssh/authorized_keys
+
+WORKDIR /home/hpcuser
