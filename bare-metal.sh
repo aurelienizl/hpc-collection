@@ -92,18 +92,10 @@ rm -rf ${BUILD_DIR}
 
 # Create a source file for environment variables
 # Users can run 'source /hpc/env.sh' to load the libraries
-ENV_FILE="${INSTALL_PREFIX}/env.sh"
-echo ">>> Generating environment script at ${ENV_FILE}..."
-
-cat <<EOF > ${ENV_FILE}
-#!/bin/bash
-export LD_LIBRARY_PATH="${INSTALL_PREFIX}/openmpi/lib:${INSTALL_PREFIX}/openblas/lib:\${LD_LIBRARY_PATH}"
-export PATH="${INSTALL_PREFIX}/openmpi/bin:${INSTALL_PREFIX}/bin:\${PATH}"
-echo "HPC Environment Loaded."
-EOF
-
-chmod +x ${ENV_FILE}
+echo ">>> Adding environment variables to ~/.bashrc..."
+echo "export LD_LIBRARY_PATH=\"${INSTALL_PREFIX}/openmpi/lib:${INSTALL_PREFIX}/openblas/lib:\${LD_LIBRARY_PATH}\"" >> ~/.bashrc
+echo "export PATH=\"${INSTALL_PREFIX}/openmpi/bin:${INSTALL_PREFIX}/bin:\${PATH}\"" >> ~/.bashrc
+echo "echo \"HPC Environment Loaded.\"" >> ~/.bashrc
 
 echo ">>> Build Complete."
 echo ">>> All binaries and libraries are located in ${INSTALL_PREFIX}"
-echo ">>> To use them, run: source ${ENV_FILE}"
