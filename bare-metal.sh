@@ -88,7 +88,7 @@ cp hpcc ${INSTALL_PREFIX}/bin/hpcc
 
 # --- 7. Cleanup & Environment Setup ---
 echo ">>> Cleaning up build directory..."
-rm -rf ${BUILD_DIR}
+sudo rm -rf ${BUILD_DIR}
 
 # Create a source file for environment variables
 # Users can run 'source /hpc/env.sh' to load the libraries
